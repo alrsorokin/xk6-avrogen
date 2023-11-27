@@ -1,0 +1,180 @@
+package k6avrogen
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+	"math"
+	"math/rand"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/hamba/avro"
+	"go.k6.io/k6/js/common"
+	"go.k6.io/k6/js/modules"
+)
+
+type builderFunc = func(map[string]any, string, bool) any
+
+var primitiveBuilder builderFunc
+var recordBuilder builderFunc
+var arrayBuilder builderFunc
+var mapBuilder builderFunc
+var unionBuilder builderFunc
+var builders map[string]builderFunc
+
+func init() {
+	modules.Register("k6/x/avrogen", new(Avro))
+
+	primitiveBuilder = PrimitiveBuilder
+	recordBuilder = RecordBuilder
+	arrayBuilder = ArrayBuilder
+	mapBuilder = MapBuilder
+	unionBuilder = UnionBuilder
+
+	builders = map[string]builderFunc{
+		"null":    primitiveBuilder,
+		"boolean": primitiveBuilder,
+		"int":     primitiveBuilder,
+		"long":    primitiveBuilder,
+		"float":   primitiveBuilder,
+		"double":  primitiveBuilder,
+		"bytes":   primitiveBuilder,
+		"string":  primitiveBuilder,
+		"fixed":   primitiveBuilder,
+		"enum":    primitiveBuilder,
+
+		"record": recordBuilder,
+		"array":  arrayBuilder,
+		"map":    mapBuilder,
+		"union":  unionBuilder,
+	}
+}
+
+type Avro struct{}
+
+type AvroSchema struct {
+	schema avro.Schema
+}
+
+func (*Avro) XNew(ctxPtr *context.Context, schema any) any {
+	rt := common.GetRuntime(*ctxPtr)
+	sh, err := json.Marshal(schema)
+	if err != nil {
+		return nil
+	}
+	s, err := avro.Parse(string(sh))
+	if err != nil {
+		return nil
+	}
+	return common.Bind(rt, &AvroSchema{schema: s}, ctxPtr)
+}
+
+func (as *AvroSchema) GenerateValue() any {
+	return generateValue(as.schema)
+}
+
+func generateValue(schema avro.Schema) any {
+	switch schema.Type() {
+	case avro.Null:
+		return nil
+	case avro.Boolean:
+		return true
+	case avro.Int:
+		return rand.Int31()
+	case avro.Long:
+		return rand.Int63n(math.MaxInt64)
+	case avro.Float:
+		return rand.Float32()
+	case avro.Double:
+		return rand.Float64()
+	case avro.Bytes:
+		return []byte{97, 98, 99, 100, 101}
+	case avro.String:
+		return "string"
+	case avro.Array:
+		schema := schema.(*avro.ArraySchema)
+		fields := []any{}
+		for i := 0; i < rand.Intn(5)+1; i++ {
+			fields = append(fields, generateValue(schema.Items()))
+		}
+		return fields
+	case avro.Map:
+		schema := schema.(*avro.MapSchema)
+		fields := map[string]any{}
+		for i := 0; i < rand.Intn(5)+1; i++ {
+			fields[fmt.Sprintf("key_%d", i)] = generateValue(schema.Values())
+		}
+		return fields
+	case avro.Enum:
+		schema := schema.(*avro.EnumSchema)
+		return schema.Symbols()[0]
+	case avro.Union:
+		schema := schema.(*avro.UnionSchema)
+		return generateValue(schema.Types()[rand.Intn(len(schema.Types()))])
+	case avro.Record:
+		schema := schema.(*avro.RecordSchema)
+		fields := map[string]any{}
+		for _, field := range schema.Fields() {
+			fields[field.Name()] = generateValue(field.Type())
+		}
+		return map[string]any{
+			schema.Name(): fields,
+		}
+	case avro.Fixed:
+		schema, _ := schema.(*avro.FixedSchema)
+		return make([]byte, schema.Size())
+	case avro.Type(avro.Decimal):
+		schema := schema.(*avro.PrimitiveSchema)
+		decimal := schema.Logical().(*avro.DecimalLogicalSchema)
+		bytes := make([]byte, decimal.Precision())
+		rand.Read(bytes)
+		return math.Float64frombits(binary.LittleEndian.Uint64(bytes))
+	case avro.Type(avro.UUID):
+		return uuid.New().String()
+	case avro.Type(avro.Date):
+		return time.Now().Unix() / (60 * 60 * 24)
+	case avro.Type(avro.TimeMillis):
+		return time.Now().Second() * 1e3
+	case avro.Type(avro.TimeMicros):
+		return time.Now().Second() * 1e6
+	case avro.Type(avro.TimestampMillis):
+		return time.Now().UnixMilli()
+	case avro.Type(avro.TimestampMicros):
+		return time.Now().UnixMicro()
+	case avro.Type(avro.Duration):
+		return make([]byte, 12)
+	}
+	return ""
+}
+
+func (*Avro) XPrepareSchema(schema any) any {
+	return toAvroSchema(schema.(map[string]any))
+}
+
+func toAvroSchema(schema map[string]any) any {
+	delete(schema, "default")
+	switch schema["type"].(type) {
+	case string:
+		t := schema["type"].(string)
+		isNullable := strings.HasSuffix(t, "*")
+		if isNullable {
+			t = t[:len(t)-1]
+		}
+		if builder, ok := builders[t]; ok {
+			return builder(schema, t, isNullable)
+		}
+
+		panic(fmt.Sprintf("Unknown type %s", t))
+	case []any:
+		schema["type"] = toAvroSchema(map[string]any{
+			"type":     "union",
+			"variants": schema["type"],
+		})
+	default:
+		schema["type"] = toAvroSchema(schema["type"].(map[string]any))
+	}
+	return schema
+}
