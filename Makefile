@@ -15,6 +15,7 @@ format: ## Applies Go formatting to code.
 	@go fmt ./...
 
 test: ## Executes any unit tests.
+	@xk6 build --with $(shell go list -m)=.
 	@./k6 run test/test.js
 
 .PHONY: build clean format help test

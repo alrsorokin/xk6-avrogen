@@ -1,7 +1,6 @@
 package k6avrogen
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hamba/avro"
-	"go.k6.io/k6/js/common"
 	"go.k6.io/k6/js/modules"
 )
 
@@ -59,8 +57,7 @@ type AvroSchema struct {
 	schema avro.Schema
 }
 
-func (*Avro) XNew(ctxPtr *context.Context, schema any) any {
-	rt := common.GetRuntime(*ctxPtr)
+func (*Avro) XNew(schema any) any {
 	sh, err := json.Marshal(schema)
 	if err != nil {
 		return nil
@@ -69,7 +66,7 @@ func (*Avro) XNew(ctxPtr *context.Context, schema any) any {
 	if err != nil {
 		return nil
 	}
-	return common.Bind(rt, &AvroSchema{schema: s}, ctxPtr)
+	return &AvroSchema{schema: s}
 }
 
 func (as *AvroSchema) GenerateValue() any {
