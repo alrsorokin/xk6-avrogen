@@ -70,10 +70,10 @@ func (*Avro) XNew(schema any) any {
 }
 
 func (as *AvroSchema) GenerateValue() any {
-	return generateValue(as.schema)
+	return generateValue(as.schema, false)
 }
 
-func generateValue(schema avro.Schema) any {
+func generateValue(schema avro.Schema, nested bool) any {
 	switch schema.Type() {
 	case avro.Null:
 		return nil
@@ -94,15 +94,23 @@ func generateValue(schema avro.Schema) any {
 	case avro.Array:
 		schema := schema.(*avro.ArraySchema)
 		fields := []any{}
+		isNested := false
+		if schema.Items().Type() == avro.Record {
+			isNested = true
+		}
 		for i := 0; i < rand.Intn(5)+1; i++ {
-			fields = append(fields, generateValue(schema.Items()))
+			fields = append(fields, generateValue(schema.Items(), isNested))
 		}
 		return fields
 	case avro.Map:
 		schema := schema.(*avro.MapSchema)
 		fields := map[string]any{}
+		isNested := false
+		if schema.Values().Type() == avro.Record {
+			isNested = true
+		}
 		for i := 0; i < rand.Intn(5)+1; i++ {
-			fields[fmt.Sprintf("key_%d", i)] = generateValue(schema.Values())
+			fields[fmt.Sprintf("key_%d", i)] = generateValue(schema.Values(), isNested)
 		}
 		return fields
 	case avro.Enum:
@@ -110,12 +118,23 @@ func generateValue(schema avro.Schema) any {
 		return schema.Symbols()[0]
 	case avro.Union:
 		schema := schema.(*avro.UnionSchema)
-		return generateValue(schema.Types()[rand.Intn(len(schema.Types()))])
+		return generateValue(schema.Types()[rand.Intn(len(schema.Types()))], false)
 	case avro.Record:
 		schema := schema.(*avro.RecordSchema)
-		fields := generateRecordValue(schema.Fields())
-		return map[string]any{
-			schema.Name(): fields,
+		fields := map[string]any{}
+		for _, field := range schema.Fields() {
+			isNested := false
+			if field.Type().Type() == avro.Record {
+				isNested = true
+			}
+			fields[field.Name()] = generateValue(field.Type(), isNested)
+		}
+		if nested {
+			return fields
+		} else {
+			return map[string]any{
+				schema.Name(): fields,
+			}
 		}
 	case avro.Fixed:
 		schema, _ := schema.(*avro.FixedSchema)
@@ -142,19 +161,6 @@ func generateValue(schema avro.Schema) any {
 		return make([]byte, 12)
 	}
 	return ""
-}
-
-func generateRecordValue(fields []*avro.Field) map[string]any {
-	genFields := map[string]any{}
-	for _, field := range fields {
-		if field.Type().Type() == avro.Record {
-			nestedRecord := field.Type().(*avro.RecordSchema)
-			genFields[field.Name()] = generateRecordValue(nestedRecord.Fields())
-		} else {
-			genFields[field.Name()] = generateValue(field.Type())
-		}
-	}
-	return genFields
 }
 
 func (*Avro) XPrepareSchema(schema any) any {
