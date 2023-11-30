@@ -113,10 +113,7 @@ func generateValue(schema avro.Schema) any {
 		return generateValue(schema.Types()[rand.Intn(len(schema.Types()))])
 	case avro.Record:
 		schema := schema.(*avro.RecordSchema)
-		fields := map[string]any{}
-		for _, field := range schema.Fields() {
-			fields[field.Name()] = generateValue(field.Type())
-		}
+		fields := generateRecordValue(schema.Fields())
 		return map[string]any{
 			schema.Name(): fields,
 		}
@@ -145,6 +142,19 @@ func generateValue(schema avro.Schema) any {
 		return make([]byte, 12)
 	}
 	return ""
+}
+
+func generateRecordValue(fields []*avro.Field) map[string]any {
+	genFields := map[string]any{}
+	for _, field := range fields {
+		if field.Type().Type() == avro.Record {
+			nestedRecord := field.Type().(*avro.RecordSchema)
+			genFields[field.Name()] = generateRecordValue(nestedRecord.Fields())
+		} else {
+			genFields[field.Name()] = generateValue(field.Type())
+		}
+	}
+	return genFields
 }
 
 func (*Avro) XPrepareSchema(schema any) any {

@@ -6,9 +6,7 @@ const tnt_schema = JSON.parse(file)
 const keys = [
   "agreement",
   "agreementSpecification",
-  "AgreementSpecification",
   "validFor",
-  "validForAgreementSpecification",
   "startDateTime"
 ]
 
