@@ -20,9 +20,17 @@ func makeNullable(schema map[string]any, def any) map[string]any {
 }
 
 func PrimitiveBuilder(schema map[string]any, t string, isNullable bool) any {
+	def, ok := schema["default"]
+	var typ []string
+	if ok {
+		typ = []string{t, "null"}
+	} else {
+		def = nil
+		typ = []string{"null", t}
+	}
 	if isNullable {
-		schema["type"] = []string{"null", t}
-		schema["default"] = nil
+		schema["type"] = typ
+		schema["default"] = def
 	}
 	return schema
 }

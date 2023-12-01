@@ -25,6 +25,11 @@
                             ]
                         },
                         "default": {}
+                    },
+                    {
+                        "name": "status",
+                        "type": "string*",
+                        "default": "initialized"
                     }
                 ]
             },

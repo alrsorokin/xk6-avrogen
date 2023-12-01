@@ -90,7 +90,7 @@ func generateValue(schema avro.Schema, nested bool) any {
 	case avro.Bytes:
 		return []byte{97, 98, 99, 100, 101}
 	case avro.String:
-		return "string"
+		return uuid.NewString()
 	case avro.Array:
 		schema := schema.(*avro.ArraySchema)
 		fields := []any{}
@@ -127,7 +127,11 @@ func generateValue(schema avro.Schema, nested bool) any {
 			if field.Type().Type() == avro.Record {
 				isNested = true
 			}
-			fields[field.Name()] = generateValue(field.Type(), isNested)
+			if field.HasDefault() {
+				fields[field.Name()] = field.Default()
+			} else {
+				fields[field.Name()] = generateValue(field.Type(), isNested)
+			}
 		}
 		if nested {
 			return fields
@@ -168,13 +172,14 @@ func (*Avro) XPrepareSchema(schema any) any {
 }
 
 func toAvroSchema(schema map[string]any) any {
-	delete(schema, "default")
 	switch schema["type"].(type) {
 	case string:
 		t := schema["type"].(string)
 		isNullable := strings.HasSuffix(t, "*")
 		if isNullable {
 			t = t[:len(t)-1]
+		} else {
+			delete(schema, "default")
 		}
 		if builder, ok := builders[t]; ok {
 			return builder(schema, t, isNullable)
@@ -182,11 +187,13 @@ func toAvroSchema(schema map[string]any) any {
 
 		panic(fmt.Sprintf("Unknown type %s", t))
 	case []any:
+		delete(schema, "default")
 		schema["type"] = toAvroSchema(map[string]any{
 			"type":     "union",
 			"variants": schema["type"],
 		})
 	default:
+		delete(schema, "default")
 		schema["type"] = toAvroSchema(schema["type"].(map[string]any))
 	}
 	return schema
